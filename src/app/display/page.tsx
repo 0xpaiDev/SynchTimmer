@@ -36,6 +36,21 @@ function DisplayInner() {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const offsetRef = useRef<number>(0);
 
+  // Prevent screen sleep
+  useEffect(() => {
+    let lock: WakeLockSentinel | null = null;
+    const acquire = async () => {
+      try { lock = await navigator.wakeLock?.request("screen"); } catch { /* unsupported */ }
+    };
+    acquire();
+    const onVisibility = () => { if (document.visibilityState === "visible") acquire(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      lock?.release();
+    };
+  }, []);
+
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
 

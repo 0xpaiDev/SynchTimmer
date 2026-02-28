@@ -28,7 +28,7 @@ export function computeTimerState(
   const elapsed = now - startTime;
 
   if (elapsed < 0) {
-    // Not started yet (within the 3s pre-start window)
+    // Not started yet (within the pre-start window)
     return { phase: "idle", remainingMs: totalMs };
   }
 

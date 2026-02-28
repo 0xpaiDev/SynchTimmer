@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
   let startTime: string | undefined;
   if (type === "START") {
-    startTime = new Date(Date.now() + 3000).toISOString();
+    startTime = new Date(Date.now() + 500).toISOString();
     await roomRef.set({
       type: "START",
       startTime,

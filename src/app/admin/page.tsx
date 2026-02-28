@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Suspense } from "react";
 import { computeTimerState, TimerPhase } from "@/lib/timer";
 import { secondsToHms, hmsToSeconds } from "@/lib/timeFormat";
-import { playOneMinWarning, playPrepToClimb, playTimerEnd } from "@/lib/audio";
+import { playOneMinWarning, playPrepToClimb, playTimerEnd, playFiveSecWarning } from "@/lib/audio";
 
 function fmtMs(ms: number): string {
   const s = Math.ceil(ms / 1000);
@@ -71,6 +71,7 @@ function AdminInner() {
   const adminSound1minFiredRef = useRef(false);
   const adminSoundStartFiredRef = useRef(false);
   const adminSoundEndFiredRef = useRef(false);
+  const adminSound5secFiredRef = useRef(false);
 
   // Stable ref to latest broadcast fn — avoids restarting the rAF loop on config changes
   const broadcastRef = useRef<((type: "START" | "RESET" | "STOP") => Promise<void>) | null>(null);
@@ -116,6 +117,7 @@ function AdminInner() {
           adminSound1minFiredRef.current = false;
           adminSoundStartFiredRef.current = false;
           adminSoundEndFiredRef.current = false;
+          adminSound5secFiredRef.current = false;
           prevPhaseAdminRef.current = "idle";
           prevRemainingAdminRef.current = 0;
           setIsRunning(true);
@@ -140,6 +142,21 @@ function AdminInner() {
 
   // Keep broadcastRef current every render
   broadcastRef.current = broadcast;
+
+  // Prevent screen sleep
+  useEffect(() => {
+    let lock: WakeLockSentinel | null = null;
+    const acquire = async () => {
+      try { lock = await navigator.wakeLock?.request("screen"); } catch { /* unsupported */ }
+    };
+    acquire();
+    const onVisibility = () => { if (document.visibilityState === "visible") acquire(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      lock?.release();
+    };
+  }, []);
 
   // rAF-driven clock
   useEffect(() => {
@@ -187,6 +204,15 @@ function AdminInner() {
         ) {
           adminSoundEndFiredRef.current = true;
           playTimerEnd();
+        }
+        if (
+          state.phase === "climb" &&
+          state.remainingMs <= 5_000 &&
+          prevRemainingAdminRef.current > 5_000 &&
+          !adminSound5secFiredRef.current
+        ) {
+          adminSound5secFiredRef.current = true;
+          playFiveSecWarning();
         }
       }
 
