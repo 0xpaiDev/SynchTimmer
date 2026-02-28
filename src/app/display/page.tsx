@@ -7,6 +7,7 @@ import { ref, onValue } from "firebase/database";
 import { calibrateOffset, getServerNow } from "@/lib/sync";
 import CountdownDisplay from "@/components/CountdownDisplay";
 import ConnectionStatus, { ConnectionState } from "@/components/ConnectionStatus";
+import { unlockAudio } from "@/lib/audio";
 
 interface RoundState {
   startTime: number | null;
@@ -14,6 +15,7 @@ interface RoundState {
   preparationSeconds: number;
   preparationEnabled: boolean;
   stopped: boolean;
+  recurring: boolean;
 }
 
 const DEFAULT_STATE: RoundState = {
@@ -22,6 +24,7 @@ const DEFAULT_STATE: RoundState = {
   preparationSeconds: 60,
   preparationEnabled: false,
   stopped: false,
+  recurring: false,
 };
 
 function DisplayInner() {
@@ -30,6 +33,7 @@ function DisplayInner() {
 
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   const [round, setRound] = useState<RoundState>(DEFAULT_STATE);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
   const offsetRef = useRef<number>(0);
 
   useEffect(() => {
@@ -79,6 +83,7 @@ function DisplayInner() {
             preparationSeconds: data.preparationSeconds,
             preparationEnabled: data.preparationEnabled,
             stopped: data.stopped ?? false,
+            recurring: data.recurring ?? false,
           });
         },
         (error) => {
@@ -104,7 +109,21 @@ function DisplayInner() {
         preparationSeconds={round.preparationSeconds}
         preparationEnabled={round.preparationEnabled}
         stopped={round.stopped}
+        audioUnlocked={audioUnlocked}
       />
+      {!audioUnlocked && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
+          onClick={() => {
+            unlockAudio();
+            setAudioUnlocked(true);
+          }}
+        >
+          <p className="text-white text-2xl font-bold tracking-widest uppercase select-none">
+            Tap to Enable Sound
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { computeTimerState, TimerPhase } from "@/lib/timer";
+import { playOneMinWarning, playPrepToClimb, playTimerEnd } from "@/lib/audio";
 
 interface CountdownDisplayProps {
   startTime: number | null;       // scheduled start timestamp (ms, local-adjusted)
@@ -9,6 +10,7 @@ interface CountdownDisplayProps {
   preparationSeconds: number;
   preparationEnabled: boolean;
   stopped: boolean;
+  audioUnlocked: boolean;
 }
 
 function formatTime(ms: number): string {
@@ -20,10 +22,10 @@ function formatTime(ms: number): string {
 }
 
 const phaseStyle: Record<TimerPhase, { bg: string; label: string; text: string }> = {
-  idle:    { bg: "bg-gray-900",   label: "",         text: "text-gray-400" },
+  idle:    { bg: "bg-gray-900",   label: "",          text: "text-gray-400" },
   prep:    { bg: "bg-yellow-900", label: "GET READY", text: "text-yellow-300" },
-  climb:   { bg: "bg-green-900",  label: "CLIMB",    text: "text-green-300" },
-  stopped: { bg: "bg-red-900",    label: "STOPPED",  text: "text-red-300" },
+  climb:   { bg: "bg-green-900",  label: "CLIMB",     text: "text-green-300" },
+  stopped: { bg: "bg-red-900",    label: "STOPPED",   text: "text-red-300" },
 };
 
 export default function CountdownDisplay({
@@ -32,10 +34,27 @@ export default function CountdownDisplay({
   preparationSeconds,
   preparationEnabled,
   stopped,
+  audioUnlocked,
 }: CountdownDisplayProps) {
   const [timerMs, setTimerMs] = useState(0);
   const [phase, setPhase] = useState<TimerPhase>("idle");
   const rafRef = useRef<number | null>(null);
+
+  // Sound tracking refs
+  const prevPhaseRef = useRef<TimerPhase>("idle");
+  const prevRemainingRef = useRef(0);
+  const sound1minFiredRef = useRef(false);
+  const soundStartFiredRef = useRef(false);
+  const soundEndFiredRef = useRef(false);
+
+  // Reset sound flags and prev refs when a new round starts
+  useEffect(() => {
+    sound1minFiredRef.current = false;
+    soundStartFiredRef.current = false;
+    soundEndFiredRef.current = false;
+    prevPhaseRef.current = "idle";
+    prevRemainingRef.current = 0;
+  }, [startTime]);
 
   useEffect(() => {
     function tick() {
@@ -55,6 +74,39 @@ export default function CountdownDisplay({
         Date.now()
       );
 
+      // --- Audio triggers ---
+      if (audioUnlocked) {
+        if (
+          prevPhaseRef.current === "prep" &&
+          state.phase === "climb" &&
+          !soundStartFiredRef.current
+        ) {
+          soundStartFiredRef.current = true;
+          playPrepToClimb();
+        }
+        if (
+          state.phase === "climb" &&
+          state.remainingMs <= 60_000 &&
+          prevRemainingRef.current > 60_000 &&
+          !sound1minFiredRef.current
+        ) {
+          sound1minFiredRef.current = true;
+          playOneMinWarning();
+        }
+        if (
+          prevPhaseRef.current === "climb" &&
+          state.phase === "idle" &&
+          !stopped &&
+          !soundEndFiredRef.current
+        ) {
+          soundEndFiredRef.current = true;
+          playTimerEnd();
+        }
+      }
+
+      prevPhaseRef.current = state.phase;
+      prevRemainingRef.current = state.remainingMs;
+
       setPhase(state.phase);
       setTimerMs(state.remainingMs);
 
@@ -68,7 +120,7 @@ export default function CountdownDisplay({
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [startTime, climbingSeconds, preparationSeconds, preparationEnabled, stopped]);
+  }, [startTime, climbingSeconds, preparationSeconds, preparationEnabled, stopped, audioUnlocked]);
 
   const { bg, label, text } = phaseStyle[phase];
 

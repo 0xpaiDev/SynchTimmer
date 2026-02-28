@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
       climbingSeconds: rest.climbingSeconds,
       preparationSeconds: rest.preparationSeconds,
       preparationEnabled: rest.preparationEnabled,
+      recurring: rest.recurring ?? false,
       stopped: false,
       updatedAt: Date.now(),
     });
