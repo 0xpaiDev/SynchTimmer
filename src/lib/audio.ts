@@ -21,6 +21,8 @@ function playBeepAt(
 ): void {
   const ctx = getAudioCtx();
   if (!ctx) return;
+  // iOS Safari suspends AudioContext after inactivity; re-resume before scheduling
+  if (ctx.state !== "running") ctx.resume();
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
   osc.connect(g);
@@ -45,7 +47,14 @@ export function playPrepToClimb(): void {
   [440, 660, 880].forEach((freq, i) => playBeepAt(freq, 120, i * 0.12));
 }
 
-/** Triple descending beep — fires when climb phase ends naturally. */
+/** Triple descending beep + final low punch — fires when climb phase ends naturally. */
 export function playTimerEnd(): void {
-  [660, 550, 440].forEach((freq, i) => playBeepAt(freq, 220, i * 0.22));
+  [660, 550, 440].forEach((freq, i) => playBeepAt(freq, 350, i * 0.35, 1.0));
+  playBeepAt(300, 500, 3 * 0.35, 0.8);
+}
+
+/** Single escalating beep — fires once per second for the last 10 seconds of climb. */
+export function playLastSecondsBeep(secsLeft: number): void {
+  const gain = 0.4 + (10 - secsLeft) * 0.06;
+  playBeepAt(880, 80, 0, gain);
 }

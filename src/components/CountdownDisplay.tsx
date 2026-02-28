@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { computeTimerState, TimerPhase } from "@/lib/timer";
-import { playOneMinWarning, playPrepToClimb, playTimerEnd } from "@/lib/audio";
+import { playOneMinWarning, playPrepToClimb, playTimerEnd, playLastSecondsBeep } from "@/lib/audio";
 
 interface CountdownDisplayProps {
   startTime: number | null;       // scheduled start timestamp (ms, local-adjusted)
@@ -46,12 +46,14 @@ export default function CountdownDisplay({
   const sound1minFiredRef = useRef(false);
   const soundStartFiredRef = useRef(false);
   const soundEndFiredRef = useRef(false);
+  const soundLastSecRef = useRef<number>(0);
 
   // Reset sound flags and prev refs when a new round starts
   useEffect(() => {
     sound1minFiredRef.current = false;
     soundStartFiredRef.current = false;
     soundEndFiredRef.current = false;
+    soundLastSecRef.current = 0;
     prevPhaseRef.current = "idle";
     prevRemainingRef.current = 0;
   }, [startTime]);
@@ -101,6 +103,13 @@ export default function CountdownDisplay({
         ) {
           soundEndFiredRef.current = true;
           playTimerEnd();
+        }
+        if (state.phase === "climb") {
+          const secsLeft = Math.ceil(state.remainingMs / 1000);
+          if (secsLeft <= 10 && secsLeft > 0 && secsLeft !== soundLastSecRef.current) {
+            soundLastSecRef.current = secsLeft;
+            playLastSecondsBeep(secsLeft);
+          }
         }
       }
 
