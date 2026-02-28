@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Suspense } from "react";
+import { computeTimerState, TimerPhase } from "@/lib/timer";
+
+function fmtMs(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 const ADMIN_PIN = process.env.NEXT_PUBLIC_ADMIN_PIN ?? "1234";
 
@@ -20,6 +26,47 @@ function AdminInner() {
   const [preparationEnabled, setPreparationEnabled] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Running clock state
+  const [timerStartTime, setTimerStartTime] = useState<number | null>(null);
+  const [timerStopped, setTimerStopped] = useState(false);
+  const [clockPhase, setClockPhase] = useState<TimerPhase>("idle");
+  const [clockRemaining, setClockRemaining] = useState(0);
+  const clockConfigRef = useRef({ climbingSeconds, preparationSeconds, preparationEnabled });
+
+  // Confirmation state for destructive actions
+  const [confirmAction, setConfirmAction] = useState<"STOP" | "RESET" | null>(null);
+
+  // Keep config ref current so the rAF closure always reads the latest values
+  clockConfigRef.current = { climbingSeconds, preparationSeconds, preparationEnabled };
+
+  // rAF-driven clock
+  useEffect(() => {
+    if (timerStartTime === null) {
+      setClockPhase("idle");
+      setClockRemaining(0);
+      return;
+    }
+    let rafId: number;
+    const tick = () => {
+      const { climbingSeconds, preparationSeconds, preparationEnabled } = clockConfigRef.current;
+      const state = computeTimerState(
+        timerStartTime,
+        climbingSeconds * 1000,
+        preparationSeconds * 1000,
+        preparationEnabled,
+        timerStopped,
+        Date.now()
+      );
+      setClockPhase(state.phase);
+      setClockRemaining(state.remainingMs);
+      if (state.phase !== "stopped" && state.remainingMs > 0) {
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [timerStartTime, timerStopped]);
 
   const displayUrl =
     typeof window !== "undefined"
@@ -53,9 +100,22 @@ function AdminInner() {
           }),
         });
         if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
         setStatus(`${type} sent`);
-        if (type === "START") setIsRunning(true);
-        if (type === "RESET" || type === "STOP") setIsRunning(false);
+        if (type === "START") {
+          setIsRunning(true);
+          setTimerStopped(false);
+          setTimerStartTime(Date.parse(data.startTime));
+        }
+        if (type === "STOP") {
+          setIsRunning(false);
+          setTimerStopped(true);
+        }
+        if (type === "RESET") {
+          setIsRunning(false);
+          setTimerStartTime(null);
+          setTimerStopped(false);
+        }
       } catch (err) {
         setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -164,32 +224,89 @@ function AdminInner() {
         {/* Controls */}
         <section className="bg-gray-800 rounded-xl p-6 space-y-3">
           <h2 className="text-lg font-semibold text-gray-300">Controls</h2>
-          <div className="grid grid-cols-3 gap-3">
-            <button
-              onClick={() => broadcast("START")}
-              disabled={isRunning}
-              className="py-4 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-lg transition-colors"
-            >
-              START
-            </button>
-            <button
-              onClick={() => broadcast("STOP")}
-              disabled={!isRunning}
-              className="py-4 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-lg transition-colors"
-            >
-              STOP
-            </button>
-            <button
-              onClick={() => broadcast("RESET")}
-              className="py-4 rounded-xl bg-gray-600 hover:bg-gray-500 font-bold text-lg transition-colors"
-            >
-              RESET
-            </button>
-          </div>
+          {confirmAction ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-center text-sm text-gray-300">
+                Confirm {confirmAction}?
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => { broadcast(confirmAction); setConfirmAction(null); }}
+                  className="py-3 rounded-xl bg-red-600 hover:bg-red-500 font-bold text-lg transition-colors"
+                >
+                  Yes, {confirmAction}
+                </button>
+                <button
+                  onClick={() => setConfirmAction(null)}
+                  className="py-3 rounded-xl bg-gray-600 hover:bg-gray-500 font-bold text-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                onClick={() => broadcast("START")}
+                disabled={isRunning}
+                className="py-4 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-lg transition-colors"
+              >
+                START
+              </button>
+              <button
+                onClick={() => {
+                  if (clockPhase === "prep" || clockPhase === "climb") {
+                    setConfirmAction("STOP");
+                  } else {
+                    broadcast("STOP");
+                  }
+                }}
+                disabled={!isRunning}
+                className="py-4 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-lg transition-colors"
+              >
+                STOP
+              </button>
+              <button
+                onClick={() => {
+                  if (clockPhase === "prep" || clockPhase === "climb") {
+                    setConfirmAction("RESET");
+                  } else {
+                    broadcast("RESET");
+                  }
+                }}
+                className="py-4 rounded-xl bg-gray-600 hover:bg-gray-500 font-bold text-lg transition-colors"
+              >
+                RESET
+              </button>
+            </div>
+          )}
           {status && (
             <p className="text-sm text-center text-gray-400">{status}</p>
           )}
         </section>
+
+        {/* Running clock */}
+        {(() => {
+          const phaseStyles: Record<TimerPhase, { bg: string; text: string; label: string }> = {
+            idle:    { bg: "bg-gray-800",   text: "text-gray-400",   label: "" },
+            prep:    { bg: "bg-yellow-900", text: "text-yellow-300", label: "GET READY" },
+            climb:   { bg: "bg-green-900",  text: "text-green-300",  label: "CLIMB" },
+            stopped: { bg: "bg-red-900",    text: "text-red-400",    label: "STOPPED" },
+          };
+          const { bg, text, label } = phaseStyles[clockPhase];
+          return (
+            <section className={`rounded-xl p-6 text-center transition-colors duration-500 ${bg}`}>
+              {label && (
+                <p className={`text-sm font-bold tracking-widest uppercase mb-1 ${text}`}>
+                  {label}
+                </p>
+              )}
+              <p className={`text-6xl font-mono font-black tabular-nums ${text}`}>
+                {timerStartTime !== null ? fmtMs(clockRemaining) : "--:--"}
+              </p>
+            </section>
+          );
+        })()}
       </div>
     </div>
   );

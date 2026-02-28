@@ -12,8 +12,9 @@ export async function POST(req: NextRequest) {
   const db = getAdminDb();
   const roomRef = db.ref(`rooms/${roomId}`);
 
+  let startTime: string | undefined;
   if (type === "START") {
-    const startTime = new Date(Date.now() + 3000).toISOString();
+    startTime = new Date(Date.now() + 3000).toISOString();
     await roomRef.set({
       type: "START",
       startTime,
@@ -29,5 +30,5 @@ export async function POST(req: NextRequest) {
     await roomRef.update({ type: "STOP", stopped: true, updatedAt: Date.now() });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, ...(startTime ? { startTime } : {}) });
 }
