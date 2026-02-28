@@ -153,7 +153,7 @@ function AdminInner() {
   return (
     <div className="min-h-screen bg-gray-950 text-white p-8">
       <div className="max-w-lg mx-auto space-y-6">
-        <h1 className="text-3xl font-bold">CompSync Admin</h1>
+        <h1 className="text-3xl font-bold">Timmer Master</h1>
 
         {/* Room ID */}
         <section className="bg-gray-800 rounded-xl p-6 space-y-3">
