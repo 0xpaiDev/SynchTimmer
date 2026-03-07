@@ -4,7 +4,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Suspense } from "react";
 import { computeTimerState, TimerPhase } from "@/lib/timer";
 import { secondsToHms, hmsToSeconds } from "@/lib/timeFormat";
-import { playOneMinWarning, playPrepToClimb, playTimerEnd, playFiveSecWarning } from "@/lib/audio";
+import { playOneMinWarning, playPrepToClimb, playTimerEnd, playCountdown10s, preloadCountdown10s } from "@/lib/audio";
+import { getFirebaseDb } from "@/lib/firebase";
+import { ref, onValue } from "firebase/database";
 
 function fmtMs(ms: number): string {
   const s = Math.ceil(ms / 1000);
@@ -13,8 +15,14 @@ function fmtMs(ms: number): string {
 
 const ADMIN_PIN = process.env.NEXT_PUBLIC_ADMIN_PIN ?? "1234";
 
+const ROOM_ADJS = ["slabby","crimpy","slopey","pumpy","gritty","spicy","thuggy","techy","greasy","balancy","sketchy","burly","flowy","juggy","dynoy"];
+const ROOM_NOUNS = ["crimp","dyno","heel","sidepull","mono","jug","undercling","pinch","sloper","gaston","mantle","smear","campus","beta","crux"];
+
 function generateRoomId(): string {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  const adj = ROOM_ADJS[Math.floor(Math.random() * ROOM_ADJS.length)];
+  const noun = ROOM_NOUNS[Math.floor(Math.random() * ROOM_NOUNS.length)];
+  const num = Math.floor(Math.random() * 99) + 1;
+  return `${adj}-${noun}-${num}`.toUpperCase();
 }
 
 function AdminInner() {
@@ -23,8 +31,17 @@ function AdminInner() {
   const [authed, setAuthed] = useState(false);
   const [pinError, setPinError] = useState(false);
 
-  // Room
-  const [roomId, setRoomId] = useState(() => generateRoomId());
+  // Room — persisted in localStorage so admin can reopen and stay in the same room
+  const [roomId, setRoomId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("adminRoomId") ?? generateRoomId();
+    }
+    return generateRoomId();
+  });
+
+  useEffect(() => {
+    localStorage.setItem("adminRoomId", roomId);
+  }, [roomId]);
 
   // Timer config
   const [climbingSeconds, setClimbingSeconds] = useState(300);
@@ -71,7 +88,10 @@ function AdminInner() {
   const adminSound1minFiredRef = useRef(false);
   const adminSoundStartFiredRef = useRef(false);
   const adminSoundEndFiredRef = useRef(false);
-  const adminSound5secFiredRef = useRef(false);
+  const adminSound10secFiredRef = useRef(false);
+
+  // For recurring: track previous clockPhase to detect climb→idle transition
+  const prevClockPhaseRef = useRef<TimerPhase>("idle");
 
   // Stable ref to latest broadcast fn — avoids restarting the rAF loop on config changes
   const broadcastRef = useRef<((type: "START" | "RESET" | "STOP") => Promise<void>) | null>(null);
@@ -117,9 +137,10 @@ function AdminInner() {
           adminSound1minFiredRef.current = false;
           adminSoundStartFiredRef.current = false;
           adminSoundEndFiredRef.current = false;
-          adminSound5secFiredRef.current = false;
+          adminSound10secFiredRef.current = false;
           prevPhaseAdminRef.current = "idle";
           prevRemainingAdminRef.current = 0;
+          prevClockPhaseRef.current = "idle";
           setIsRunning(true);
           setTimerStopped(false);
           setTimerStartTime(Date.parse(data.startTime));
@@ -207,25 +228,13 @@ function AdminInner() {
         }
         if (
           state.phase === "climb" &&
-          state.remainingMs <= 5_000 &&
-          prevRemainingAdminRef.current > 5_000 &&
-          !adminSound5secFiredRef.current
+          state.remainingMs <= 10_000 &&
+          prevRemainingAdminRef.current > 10_000 &&
+          !adminSound10secFiredRef.current
         ) {
-          adminSound5secFiredRef.current = true;
-          playFiveSecWarning();
+          adminSound10secFiredRef.current = true;
+          playCountdown10s();
         }
-      }
-
-      // --- Recurring auto-restart ---
-      if (
-        prevPhaseAdminRef.current === "climb" &&
-        state.phase === "idle" &&
-        !timerStopped &&
-        recurringRef.current &&
-        !hasAutoRestartedRef.current
-      ) {
-        hasAutoRestartedRef.current = true; // sync guard — prevents double-fire on next frame
-        broadcastRef.current?.("START");
       }
 
       prevPhaseAdminRef.current = state.phase;
@@ -240,6 +249,91 @@ function AdminInner() {
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [timerStartTime, timerStopped]);
+
+  // Recurring auto-restart: detect climb→idle transition via React state (more reliable than rAF)
+  useEffect(() => {
+    if (
+      prevClockPhaseRef.current === "climb" &&
+      clockPhase === "idle" &&
+      !timerStopped &&
+      recurringRef.current &&
+      !hasAutoRestartedRef.current
+    ) {
+      hasAutoRestartedRef.current = true;
+      broadcastRef.current?.("START");
+    }
+    prevClockPhaseRef.current = clockPhase;
+  }, [clockPhase, timerStopped]);
+
+  // Preload 10s countdown MP3 on mount
+  useEffect(() => {
+    preloadCountdown10s();
+  }, []);
+
+  // Firebase subscription — recover round state when admin reopens (e.g. after phone sleep)
+  useEffect(() => {
+    if (!authed) return;
+
+    const db = getFirebaseDb();
+    const roomRef = ref(db, `rooms/${roomId}`);
+
+    const unsub = onValue(roomRef, (snapshot) => {
+      const data = snapshot.val();
+
+      if (!data) {
+        setTimerStartTime(null);
+        setTimerStopped(false);
+        setIsRunning(false);
+        return;
+      }
+
+      const serverStart = new Date(data.startTime).getTime();
+      const totalMs =
+        (data.preparationEnabled ? data.preparationSeconds * 1000 : 0) +
+        data.climbingSeconds * 1000;
+
+      // Round already expired naturally — treat as idle
+      if (Date.now() >= serverStart + totalMs && !data.stopped) {
+        setTimerStartTime(null);
+        setTimerStopped(false);
+        setIsRunning(false);
+        return;
+      }
+
+      // Sync config so admin shows correct values after reopening
+      setClimbingSeconds(data.climbingSeconds);
+      setPreparationSeconds(data.preparationSeconds);
+      setPreparationEnabled(data.preparationEnabled ?? false);
+      setRecurring(data.recurring ?? false);
+
+      if (data.stopped) {
+        setTimerStartTime(serverStart);
+        setTimerStopped(true);
+        setIsRunning(false);
+      } else {
+        setTimerStartTime(serverStart);
+        setTimerStopped(false);
+        setIsRunning(true);
+        hasAutoRestartedRef.current = false;
+        prevClockPhaseRef.current = "idle";
+        // Pre-mark admin sounds as fired if joining a round already in progress
+        const nowMs = Date.now();
+        const prepMs = data.preparationEnabled ? data.preparationSeconds * 1000 : 0;
+        const climbMs = data.climbingSeconds * 1000;
+        const elapsedMs = nowMs - serverStart;
+        const inOrPastClimb = elapsedMs >= prepMs;
+        const climbRemaining = Math.max(0, climbMs - Math.max(0, elapsedMs - prepMs));
+        adminSoundStartFiredRef.current = inOrPastClimb;
+        adminSound1minFiredRef.current = inOrPastClimb && climbRemaining <= 60_000;
+        adminSound10secFiredRef.current = inOrPastClimb && climbRemaining <= 10_000;
+        adminSoundEndFiredRef.current = false;
+        prevPhaseAdminRef.current = "idle";
+        prevRemainingAdminRef.current = 0;
+      }
+    });
+
+    return () => unsub();
+  }, [authed, roomId]);
 
   // Derived HMS values for display in HMS input mode
   const climbHms = secondsToHms(climbingSeconds);
@@ -547,7 +641,7 @@ function AdminInner() {
                 </p>
               )}
               <p className={`text-6xl font-mono font-black tabular-nums ${text}`}>
-                {timerStartTime !== null ? fmtMs(clockRemaining) : "--:--"}
+                {timerStartTime !== null && clockPhase !== "idle" ? fmtMs(clockRemaining) : "--:--"}
               </p>
             </section>
           );

@@ -7,7 +7,7 @@ import { ref, onValue } from "firebase/database";
 import { calibrateOffset, getServerNow } from "@/lib/sync";
 import CountdownDisplay from "@/components/CountdownDisplay";
 import ConnectionStatus, { ConnectionState } from "@/components/ConnectionStatus";
-import { unlockAudio } from "@/lib/audio";
+import { unlockAudio, preloadCountdown10s } from "@/lib/audio";
 
 interface RoundState {
   startTime: number | null;
@@ -115,6 +115,38 @@ function DisplayInner() {
     };
   }, [roomId]);
 
+  // Recurring: display fires the next START when round expires — works even when admin is closed
+  useEffect(() => {
+    if (!round.recurring || !round.startTime || round.stopped) return;
+
+    const totalMs =
+      (round.preparationEnabled ? round.preparationSeconds * 1000 : 0) +
+      round.climbingSeconds * 1000;
+    const delay = round.startTime + totalMs - Date.now();
+    if (delay <= 0) return;
+
+    const timerId = setTimeout(async () => {
+      try {
+        await fetch("/api/broadcast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "START",
+            roomId,
+            climbingSeconds: round.climbingSeconds,
+            preparationSeconds: round.preparationSeconds,
+            preparationEnabled: round.preparationEnabled,
+            recurring: round.recurring,
+          }),
+        });
+      } catch (e) {
+        console.warn("Recurring restart failed", e);
+      }
+    }, delay);
+
+    return () => clearTimeout(timerId);
+  }, [round.startTime, round.recurring, round.stopped, roomId]);
+
   return (
     <div className="relative w-full h-screen">
       <ConnectionStatus state={connState} />
@@ -131,6 +163,7 @@ function DisplayInner() {
           className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
           onClick={() => {
             unlockAudio();
+            preloadCountdown10s();
             setAudioUnlocked(true);
           }}
         >

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { computeTimerState, TimerPhase } from "@/lib/timer";
-import { playOneMinWarning, playPrepToClimb, playTimerEnd, playFiveSecWarning, playLastSecondsBeep } from "@/lib/audio";
+import { playOneMinWarning, playPrepToClimb, playTimerEnd, playCountdown10s } from "@/lib/audio";
 
 interface CountdownDisplayProps {
   startTime: number | null;       // scheduled start timestamp (ms, local-adjusted)
@@ -46,18 +46,34 @@ export default function CountdownDisplay({
   const sound1minFiredRef = useRef(false);
   const soundStartFiredRef = useRef(false);
   const soundEndFiredRef = useRef(false);
-  const sound5secFiredRef = useRef(false);
-  const soundLastSecRef = useRef<number>(0);
+  const sound10secFiredRef = useRef(false);
 
-  // Reset sound flags and prev refs when a new round starts
+  // Reset sound flags and prev refs when a new round starts.
+  // If joining mid-round, pre-mark already-past sounds as fired so they don't replay.
   useEffect(() => {
-    sound1minFiredRef.current = false;
-    soundStartFiredRef.current = false;
+    if (startTime === null) {
+      sound1minFiredRef.current = false;
+      soundStartFiredRef.current = false;
+      soundEndFiredRef.current = false;
+      sound10secFiredRef.current = false;
+      prevPhaseRef.current = "idle";
+      prevRemainingRef.current = 0;
+      return;
+    }
+    const now = Date.now();
+    const climbMs = climbingSeconds * 1000;
+    const prepMs = preparationEnabled ? preparationSeconds * 1000 : 0;
+    const elapsed = now - startTime;
+    const inOrPastClimb = elapsed >= prepMs;
+    const climbRemaining = Math.max(0, climbMs - Math.max(0, elapsed - prepMs));
+    soundStartFiredRef.current = inOrPastClimb;
+    sound1minFiredRef.current = inOrPastClimb && climbRemaining <= 60_000;
+    sound10secFiredRef.current = inOrPastClimb && climbRemaining <= 10_000;
     soundEndFiredRef.current = false;
-    sound5secFiredRef.current = false;
-    soundLastSecRef.current = 0;
-    prevPhaseRef.current = "idle";
-    prevRemainingRef.current = 0;
+    const state = computeTimerState(startTime, climbMs, prepMs, preparationEnabled, false, now);
+    prevPhaseRef.current = state.phase;
+    prevRemainingRef.current = state.remainingMs;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startTime]);
 
   useEffect(() => {
@@ -108,19 +124,12 @@ export default function CountdownDisplay({
         }
         if (
           state.phase === "climb" &&
-          state.remainingMs <= 5_000 &&
-          prevRemainingRef.current > 5_000 &&
-          !sound5secFiredRef.current
+          state.remainingMs <= 10_000 &&
+          prevRemainingRef.current > 10_000 &&
+          !sound10secFiredRef.current
         ) {
-          sound5secFiredRef.current = true;
-          playFiveSecWarning();
-        }
-        if (state.phase === "climb") {
-          const secsLeft = Math.ceil(state.remainingMs / 1000);
-          if (secsLeft <= 10 && secsLeft > 0 && secsLeft !== soundLastSecRef.current) {
-            soundLastSecRef.current = secsLeft;
-            playLastSecondsBeep(secsLeft);
-          }
+          sound10secFiredRef.current = true;
+          playCountdown10s();
         }
       }
 
@@ -152,7 +161,7 @@ export default function CountdownDisplay({
         </div>
       )}
       <div className={`text-[20vw] font-mono font-black leading-none ${text} tabular-nums`}>
-        {startTime === null && phase === "idle" ? "--:--" : formatTime(timerMs)}
+        {phase === "idle" ? "--:--" : formatTime(timerMs)}
       </div>
     </div>
   );

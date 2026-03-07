@@ -37,7 +37,7 @@ export function computeTimerState(
   }
 
   if (preparationEnabled && elapsed < preparationMs) {
-    return { phase: "prep", remainingMs: totalMs - elapsed };
+    return { phase: "prep", remainingMs: preparationMs - elapsed };
   }
 
   return { phase: "climb", remainingMs: totalMs - elapsed };
