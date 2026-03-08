@@ -175,6 +175,9 @@ function AdminInner() {
           // Do NOT reset sound flags — mid-round join logic in startTime useEffect handles it
         }
         if (type === "RESET") {
+          // Prevent recurring auto-restart from seeing a climb→idle transition
+          prevClockPhaseRef.current = "idle";
+          hasAutoRestartedRef.current = true;
           setIsRunning(false);
           setTimerStartTime(null);
           setTimerStopped(false);
