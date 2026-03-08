@@ -687,7 +687,7 @@ function AdminInner() {
               START
             </button>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               {timerPaused ? (
                 <button
                   onClick={() => broadcast("RESUME")}
@@ -703,6 +703,12 @@ function AdminInner() {
                   PAUSE
                 </button>
               )}
+              <button
+                onClick={() => setConfirmAction("STOP")}
+                className="py-4 rounded-xl bg-[#dc2626] hover:bg-red-500 font-black text-lg text-white transition-colors"
+              >
+                STOP
+              </button>
               <button
                 onClick={() => {
                   if (timerStartTime !== null) {
