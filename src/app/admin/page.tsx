@@ -671,7 +671,7 @@ function AdminInner() {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => {
-                    broadcast(confirmAction === "STOP" ? "STOP" : "START");
+                    broadcast(confirmAction === "STOP" ? "RESET" : "START");
                     setConfirmAction(null);
                   }}
                   className="py-3 rounded-xl bg-[#dc2626] hover:bg-red-500 font-bold text-lg text-white transition-colors"
