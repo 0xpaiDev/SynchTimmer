@@ -35,7 +35,7 @@ function AdminInner() {
   // Room — persisted in localStorage so admin can reopen and stay in the same room
   const [roomId, setRoomId] = useState(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("adminRoomId") ?? generateRoomId();
+      return localStorage.getItem("adminRoomId") ?? "MAIN";
     }
     return generateRoomId();
   });
@@ -65,12 +65,17 @@ function AdminInner() {
   // Running clock state
   const [timerStartTime, setTimerStartTime] = useState<number | null>(null);
   const [timerStopped, setTimerStopped] = useState(false);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [timerPausedElapsedMs, setTimerPausedElapsedMs] = useState(0);
   const [clockPhase, setClockPhase] = useState<TimerPhase>("idle");
   const [clockRemaining, setClockRemaining] = useState(0);
 
   // Refs — keep values fresh in rAF closures without restarting the loop
   const clockConfigRef = useRef({ climbingSeconds, preparationSeconds, preparationEnabled });
   clockConfigRef.current = { climbingSeconds, preparationSeconds, preparationEnabled };
+
+  const pauseStateRef = useRef({ paused: false, pausedElapsedMs: 0 });
+  pauseStateRef.current = { paused: timerPaused, pausedElapsedMs: timerPausedElapsedMs };
 
   const recurringRef = useRef(false);
   recurringRef.current = recurring;
@@ -98,7 +103,7 @@ function AdminInner() {
   const prevClockPhaseRef = useRef<TimerPhase>("idle");
 
   // Stable ref to latest broadcast fn — avoids restarting the rAF loop on config changes
-  const broadcastRef = useRef<((type: "START" | "RESET" | "STOP") => Promise<void>) | null>(null);
+  const broadcastRef = useRef<((type: "START" | "RESET" | "STOP" | "PAUSE" | "RESUME") => Promise<void>) | null>(null);
 
   const displayUrl =
     typeof window !== "undefined"
@@ -117,7 +122,7 @@ function AdminInner() {
   }
 
   const broadcast = useCallback(
-    async (type: "START" | "RESET" | "STOP") => {
+    async (type: "START" | "RESET" | "STOP" | "PAUSE" | "RESUME") => {
       setStatus(null);
       if (!roomId.trim()) {
         setStatus("Error: Room name cannot be empty");
@@ -159,10 +164,22 @@ function AdminInner() {
           setIsRunning(false);
           setTimerStopped(true);
         }
+        if (type === "PAUSE") {
+          setTimerPaused(true);
+          // isRunning stays true — session is still active
+        }
+        if (type === "RESUME") {
+          setTimerPaused(false);
+          setTimerPausedElapsedMs(0);
+          setTimerStartTime(Date.parse(data.startTime));
+          // Do NOT reset sound flags — mid-round join logic in startTime useEffect handles it
+        }
         if (type === "RESET") {
           setIsRunning(false);
           setTimerStartTime(null);
           setTimerStopped(false);
+          setTimerPaused(false);
+          setTimerPausedElapsedMs(0);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -207,7 +224,9 @@ function AdminInner() {
         preparationSeconds * 1000,
         preparationEnabled,
         timerStopped,
-        Date.now()
+        Date.now(),
+        pauseStateRef.current.paused,
+        pauseStateRef.current.pausedElapsedMs
       );
 
       // --- Audio triggers ---
@@ -268,6 +287,7 @@ function AdminInner() {
       prevClockPhaseRef.current === "climb" &&
       clockPhase === "idle" &&
       !timerStopped &&
+      !timerPaused &&
       recurringRef.current &&
       !hasAutoRestartedRef.current
     ) {
@@ -276,7 +296,7 @@ function AdminInner() {
       broadcastRef.current?.("START");
     }
     prevClockPhaseRef.current = clockPhase;
-  }, [clockPhase, timerStopped]);
+  }, [clockPhase, timerStopped, timerPaused]);
 
   // Preload 10s countdown MP3 on mount
   useEffect(() => {
@@ -327,8 +347,8 @@ function AdminInner() {
         (data.preparationEnabled ? data.preparationSeconds * 1000 : 0) +
         data.climbingSeconds * 1000;
 
-      // Round already expired naturally — treat as idle
-      if (Date.now() >= serverStart + totalMs && !data.stopped) {
+      // Round already expired naturally — treat as idle (paused sessions are exempt)
+      if (Date.now() >= serverStart + totalMs && !data.stopped && !data.paused) {
         setTimerStartTime(null);
         setTimerStopped(false);
         setIsRunning(false);
@@ -344,10 +364,14 @@ function AdminInner() {
       if (data.stopped) {
         setTimerStartTime(serverStart);
         setTimerStopped(true);
+        setTimerPaused(false);
+        setTimerPausedElapsedMs(0);
         setIsRunning(false);
       } else {
         setTimerStartTime(serverStart);
         setTimerStopped(false);
+        setTimerPaused(data.paused ?? false);
+        setTimerPausedElapsedMs(data.pausedElapsedMs ?? 0);
         setIsRunning(true);
         hasAutoRestartedRef.current = false;
         prevClockPhaseRef.current = "idle";
@@ -355,7 +379,10 @@ function AdminInner() {
         const nowMs = Date.now();
         const prepMs = data.preparationEnabled ? data.preparationSeconds * 1000 : 0;
         const climbMs = data.climbingSeconds * 1000;
-        const elapsedMs = nowMs - serverStart;
+        // Use pausedElapsedMs as the effective elapsed time when paused
+        const elapsedMs = data.paused
+          ? (data.pausedElapsedMs ?? 0)
+          : nowMs - serverStart;
         const inOrPastClimb = elapsedMs >= prepMs;
         const climbRemaining = Math.max(0, climbMs - Math.max(0, elapsedMs - prepMs));
         adminSoundStartFiredRef.current = inOrPastClimb;
@@ -472,12 +499,16 @@ function AdminInner() {
 
         {/* Live session banner */}
         {timerStartTime !== null && (() => {
-          const isLive = !timerStopped;
+          const isLive = !timerStopped && !timerPaused;
+          const isPaused = !timerStopped && timerPaused;
+          const bannerBg = isLive ? "bg-green-900/50 border-green-500/30" : isPaused ? "bg-blue-900/50 border-blue-500/30" : "bg-red-900/50 border-red-500/30";
+          const bannerTextColor = isLive ? "text-green-400" : isPaused ? "text-blue-400" : "text-red-400";
+          const bannerLabel = isLive ? "● LIVE" : isPaused ? "⏸ PAUSED" : "● STOPPED";
           return (
-            <section className={`rounded-xl px-5 py-4 border ${isLive ? "bg-green-900/50 border-green-500/30" : "bg-red-900/50 border-red-500/30"}`}>
+            <section className={`rounded-xl px-5 py-4 border ${bannerBg}`}>
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-black tracking-widest ${isLive ? "text-green-400" : "text-red-400"}`}>
-                  {isLive ? "● LIVE" : "● STOPPED"}
+                <span className={`text-xs font-black tracking-widest ${bannerTextColor}`}>
+                  {bannerLabel}
                 </span>
                 <span className="text-sm font-mono font-bold text-[#f4f4f4] tracking-widest">{roomId}</span>
               </div>
@@ -648,31 +679,33 @@ function AdminInner() {
                 </button>
               </div>
             </div>
+          ) : !isRunning ? (
+            <button
+              onClick={() => broadcast("START")}
+              className="w-full py-4 rounded-xl bg-[#16a34a] hover:bg-green-500 font-black text-lg text-white transition-colors"
+            >
+              START
+            </button>
           ) : (
-            <div className="grid grid-cols-3 gap-3">
-              <button
-                onClick={() => broadcast("START")}
-                disabled={isRunning}
-                className="py-4 rounded-xl bg-[#16a34a] hover:bg-green-500 disabled:opacity-30 disabled:cursor-not-allowed font-black text-lg text-white transition-colors"
-              >
-                START
-              </button>
-              <button
-                onClick={() => {
-                  if (clockPhase === "prep" || clockPhase === "climb") {
-                    setConfirmAction("STOP");
-                  } else {
-                    broadcast("STOP");
-                  }
-                }}
-                disabled={!isRunning}
-                className="py-4 rounded-xl bg-[#dc2626] hover:bg-red-500 disabled:opacity-30 disabled:cursor-not-allowed font-black text-lg text-white transition-colors"
-              >
-                STOP
-              </button>
+            <div className="grid grid-cols-2 gap-3">
+              {timerPaused ? (
+                <button
+                  onClick={() => broadcast("RESUME")}
+                  className="py-4 rounded-xl bg-[#16a34a] hover:bg-green-500 font-black text-lg text-white transition-colors"
+                >
+                  RESUME
+                </button>
+              ) : (
+                <button
+                  onClick={() => broadcast("PAUSE")}
+                  className="py-4 rounded-xl bg-[#ca8a04] hover:bg-yellow-500 font-black text-lg text-white transition-colors"
+                >
+                  PAUSE
+                </button>
+              )}
               <button
                 onClick={() => {
-                  if (clockPhase === "prep" || clockPhase === "climb") {
+                  if (timerStartTime !== null) {
                     setConfirmAction("RESET");
                   } else {
                     broadcast("RESET");
@@ -696,6 +729,7 @@ function AdminInner() {
             prep:    { bg: "bg-yellow-900/60", text: "text-yellow-300",  label: "GET READY", border: "border-yellow-500/30" },
             climb:   { bg: "bg-green-900/60",  text: "text-green-300",   label: "CLIMB",     border: "border-green-500/30" },
             stopped: { bg: "bg-red-900/60",    text: "text-red-400",     label: "STOPPED",   border: "border-red-500/30" },
+            paused:  { bg: "bg-blue-900/60",   text: "text-blue-300",    label: "PAUSED",    border: "border-blue-500/30" },
           };
           const { bg, text, label, border } = phaseStyles[clockPhase];
           return (

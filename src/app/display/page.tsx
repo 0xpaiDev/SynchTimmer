@@ -17,6 +17,8 @@ interface RoundState {
   preparationEnabled: boolean;
   stopped: boolean;
   recurring: boolean;
+  paused: boolean;
+  pausedElapsedMs: number;
 }
 
 const DEFAULT_STATE: RoundState = {
@@ -26,6 +28,8 @@ const DEFAULT_STATE: RoundState = {
   preparationEnabled: false,
   stopped: false,
   recurring: false,
+  paused: false,
+  pausedElapsedMs: 0,
 };
 
 function LogOverlay({ onClose }: { onClose: () => void }) {
@@ -222,6 +226,8 @@ function DisplayInner() {
             preparationEnabled: data.preparationEnabled,
             stopped: data.stopped ?? false,
             recurring: data.recurring ?? false,
+            paused: data.paused ?? false,
+            pausedElapsedMs: data.pausedElapsedMs ?? 0,
           });
         },
         (error) => {
@@ -266,7 +272,7 @@ function DisplayInner() {
 
   // Recurring: display fires the next START when round expires — works even when admin is closed
   useEffect(() => {
-    if (!round.recurring || !round.startTime || round.stopped) return;
+    if (!round.recurring || !round.startTime || round.stopped || round.paused) return;
 
     const totalMs =
       (round.preparationEnabled ? round.preparationSeconds * 1000 : 0) +
@@ -312,6 +318,8 @@ function DisplayInner() {
         preparationEnabled={round.preparationEnabled}
         stopped={round.stopped}
         audioUnlocked={audioUnlocked}
+        paused={round.paused}
+        pausedElapsedMs={round.pausedElapsedMs}
       />
 
       {/* Audio unlock overlay */}

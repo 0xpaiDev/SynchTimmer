@@ -11,6 +11,8 @@ interface CountdownDisplayProps {
   preparationEnabled: boolean;
   stopped: boolean;
   audioUnlocked: boolean;
+  paused?: boolean;
+  pausedElapsedMs?: number;
 }
 
 function formatTime(ms: number): string {
@@ -26,6 +28,7 @@ const phaseStyle: Record<TimerPhase, { bg: string; label: string; text: string }
   prep:    { bg: "bg-yellow-900", label: "GET READY", text: "text-yellow-300" },
   climb:   { bg: "bg-green-900",  label: "CLIMB",     text: "text-green-300" },
   stopped: { bg: "bg-red-900",    label: "STOPPED",   text: "text-red-300" },
+  paused:  { bg: "bg-blue-900",   label: "PAUSED",    text: "text-blue-300" },
 };
 
 export default function CountdownDisplay({
@@ -35,6 +38,8 @@ export default function CountdownDisplay({
   preparationEnabled,
   stopped,
   audioUnlocked,
+  paused = false,
+  pausedElapsedMs = 0,
 }: CountdownDisplayProps) {
   const [timerMs, setTimerMs] = useState(0);
   const [phase, setPhase] = useState<TimerPhase>("idle");
@@ -70,7 +75,7 @@ export default function CountdownDisplay({
     sound1minFiredRef.current = inOrPastClimb && climbRemaining <= 60_000;
     sound10secFiredRef.current = inOrPastClimb && climbRemaining <= 10_000;
     soundEndFiredRef.current = false;
-    const state = computeTimerState(startTime, climbMs, prepMs, preparationEnabled, false, now);
+    const state = computeTimerState(startTime, climbMs, prepMs, preparationEnabled, false, now, paused, pausedElapsedMs);
     prevPhaseRef.current = state.phase;
     prevRemainingRef.current = state.remainingMs;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,7 +96,9 @@ export default function CountdownDisplay({
         preparationSeconds * 1000,
         preparationEnabled,
         stopped,
-        Date.now()
+        Date.now(),
+        paused,
+        pausedElapsedMs
       );
 
       // --- Audio triggers ---
@@ -149,7 +156,7 @@ export default function CountdownDisplay({
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [startTime, climbingSeconds, preparationSeconds, preparationEnabled, stopped, audioUnlocked]);
+  }, [startTime, climbingSeconds, preparationSeconds, preparationEnabled, stopped, audioUnlocked, paused, pausedElapsedMs]);
 
   const { bg, label, text } = phaseStyle[phase];
 

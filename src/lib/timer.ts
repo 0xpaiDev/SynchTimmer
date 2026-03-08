@@ -1,4 +1,4 @@
-export type TimerPhase = "idle" | "prep" | "climb" | "stopped";
+export type TimerPhase = "idle" | "prep" | "climb" | "stopped" | "paused";
 
 export interface TimerState {
   phase: TimerPhase;
@@ -15,10 +15,22 @@ export function computeTimerState(
   preparationMs: number,
   preparationEnabled: boolean,
   stopped: boolean,
-  now: number               // current local time (ms)
+  now: number,              // current local time (ms)
+  paused?: boolean,
+  pausedElapsedMs?: number
 ): TimerState {
   if (stopped) {
     return { phase: "stopped", remainingMs: 0 };
+  }
+
+  if (paused && pausedElapsedMs !== undefined) {
+    const totalMs = preparationEnabled ? preparationMs + climbingMs : climbingMs;
+    const elapsed = pausedElapsedMs;
+    if (elapsed >= totalMs) return { phase: "paused", remainingMs: 0 };
+    if (preparationEnabled && elapsed < preparationMs) {
+      return { phase: "paused", remainingMs: preparationMs - elapsed };
+    }
+    return { phase: "paused", remainingMs: totalMs - elapsed };
   }
 
   const totalMs = preparationEnabled
