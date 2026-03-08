@@ -8,6 +8,7 @@ import { calibrateOffset, getServerNow } from "@/lib/sync";
 import CountdownDisplay from "@/components/CountdownDisplay";
 import ConnectionStatus, { ConnectionState } from "@/components/ConnectionStatus";
 import { unlockAudio, preloadCountdown10s } from "@/lib/audio";
+import { log, getLogs, clearLogs } from "@/lib/logger";
 
 interface RoundState {
   startTime: number | null;
@@ -27,14 +28,77 @@ const DEFAULT_STATE: RoundState = {
   recurring: false,
 };
 
+function LogOverlay({ onClose }: { onClose: () => void }) {
+  const [entries, setEntries] = useState<string[]>([]);
+
+  useEffect(() => {
+    setEntries(getLogs().reverse());
+  }, []);
+
+  function handleClear() {
+    clearLogs();
+    setEntries([]);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/90 flex flex-col"
+      onClick={onClose}
+    >
+      <div
+        className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-white/10 shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="text-white font-mono text-sm font-bold">
+          Logs ({entries.length})
+        </span>
+        <div className="flex gap-3">
+          <button
+            onClick={handleClear}
+            className="text-red-400 hover:text-red-300 text-xs font-mono"
+          >
+            Clear
+          </button>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white text-xs font-mono"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+      <div
+        className="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-300 space-y-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {entries.length === 0 ? (
+          <p className="text-gray-500">No logs yet.</p>
+        ) : (
+          entries.map((e, i) => (
+            <p key={i} className="break-all leading-relaxed">
+              {e}
+            </p>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DisplayInner() {
   const params = useSearchParams();
-  const roomId = params.get("room") ?? "default";
+  // Use || so that an empty ?room= param also falls back to "default"
+  const roomId = params.get("room") || "default";
 
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   const [round, setRound] = useState<RoundState>(DEFAULT_STATE);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const offsetRef = useRef<number>(0);
+  const retryCountRef = useRef<number>(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const recalibTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Prevent screen sleep
   useEffect(() => {
@@ -52,27 +116,54 @@ function DisplayInner() {
   }, []);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
 
     async function init() {
-      // 1. Calibrate clock offset before subscribing
+      if (cancelled) return;
+
+      // 1. Calibrate clock offset
       try {
+        const prev = offsetRef.current;
         offsetRef.current = await calibrateOffset();
+        if (retryCountRef.current === 0) {
+          log("sync", `initial calibration offset=${offsetRef.current}ms`);
+        } else {
+          log("sync", `recalibrated after reconnect offset=${offsetRef.current}ms drift=${offsetRef.current - prev}ms`);
+        }
       } catch {
-        console.warn("Clock calibration failed, using offset=0");
+        log("sync", "calibration failed, using offset=0");
       }
 
-      // 2. Subscribe to Firebase RTDB — new displays joining mid-round
-      //    automatically receive the current persisted state
+      if (cancelled) return;
+
+      // 2. Subscribe to Firebase RTDB
       const db = getFirebaseDb();
       const roomRef = ref(db, `rooms/${roomId}`);
       setConnState("connecting");
+      log("firebase", `subscribing room=${roomId}`);
 
-      unsubscribe = onValue(
+      // Clean up any previous subscription
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+
+      const unsub = onValue(
         roomRef,
         (snapshot) => {
+          if (cancelled) return;
+          const wasRetrying = retryCountRef.current > 0;
+          if (wasRetrying) {
+            log("firebase", `reconnected after ${retryCountRef.current} attempt(s)`);
+          }
+          retryCountRef.current = 0;
           setConnState("connected");
+
           const data = snapshot.val();
+          log("firebase", `snapshot received`, {
+            hasData: !!data,
+            type: data?.type ?? null,
+            startTime: data?.startTime ?? null,
+            stopped: data?.stopped ?? null,
+          });
 
           if (!data) {
             setRound(DEFAULT_STATE);
@@ -88,6 +179,12 @@ function DisplayInner() {
 
           // If round already expired and not manually stopped, show idle
           if (serverNow >= serverStart + totalMs && !data.stopped) {
+            log("display", "early-expiry guard fired → idle", {
+              serverNow,
+              serverStart,
+              totalMs,
+              offset: offsetRef.current,
+            });
             setRound(DEFAULT_STATE);
             return;
           }
@@ -108,16 +205,42 @@ function DisplayInner() {
           });
         },
         (error) => {
-          console.error("Firebase error:", error);
+          if (cancelled) return;
+          const delay = Math.min(2000 * Math.pow(2, retryCountRef.current), 30000);
+          log("firebase", `error — retrying in ${delay}ms (attempt ${retryCountRef.current + 1})`, {
+            message: error.message,
+          });
           setConnState("offline");
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(() => {
+            if (!cancelled) init();
+          }, delay);
         }
       );
+
+      unsubscribeRef.current = unsub;
     }
 
     init();
 
+    // Periodic offset recalibration every 5 minutes
+    recalibTimerRef.current = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const prev = offsetRef.current;
+        offsetRef.current = await calibrateOffset();
+        log("sync", `recalibrated offset=${offsetRef.current}ms drift=${offsetRef.current - prev}ms`);
+      } catch {
+        log("sync", "periodic recalibration failed");
+      }
+    }, 5 * 60 * 1000);
+
     return () => {
-      unsubscribe?.();
+      cancelled = true;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      if (retryTimerRef.current !== null) clearTimeout(retryTimerRef.current);
+      if (recalibTimerRef.current !== null) clearInterval(recalibTimerRef.current);
     };
   }, [roomId]);
 
@@ -164,6 +287,8 @@ function DisplayInner() {
         stopped={round.stopped}
         audioUnlocked={audioUnlocked}
       />
+
+      {/* Audio unlock overlay */}
       {!audioUnlocked && (
         <div
           className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
@@ -178,6 +303,18 @@ function DisplayInner() {
           </p>
         </div>
       )}
+
+      {/* Log button */}
+      <button
+        onClick={() => setShowLogs(true)}
+        className="fixed bottom-3 right-3 z-40 px-2 py-1 rounded bg-black/40 text-white/40 hover:text-white/80 font-mono text-xs select-none"
+        aria-label="Show logs"
+      >
+        LOG
+      </button>
+
+      {/* Log overlay */}
+      {showLogs && <LogOverlay onClose={() => setShowLogs(false)} />}
     </div>
   );
 }

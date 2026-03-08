@@ -7,6 +7,7 @@ import { secondsToHms, hmsToSeconds } from "@/lib/timeFormat";
 import { playOneMinWarning, playPrepToClimb, playTimerEnd, playCountdown10s, preloadCountdown10s } from "@/lib/audio";
 import { getFirebaseDb } from "@/lib/firebase";
 import { ref, onValue } from "firebase/database";
+import { log } from "@/lib/logger";
 
 function fmtMs(ms: number): string {
   const s = Math.ceil(ms / 1000);
@@ -118,6 +119,11 @@ function AdminInner() {
   const broadcast = useCallback(
     async (type: "START" | "RESET" | "STOP") => {
       setStatus(null);
+      if (!roomId.trim()) {
+        setStatus("Error: Room name cannot be empty");
+        return;
+      }
+      log("admin", `broadcast type=${type} roomId=${roomId}`);
       try {
         const res = await fetch("/api/broadcast", {
           method: "POST",
@@ -133,6 +139,7 @@ function AdminInner() {
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
+        log("admin", `broadcast result: OK type=${type}`);
         setStatus(`${type} sent`);
         if (type === "START") {
           // Reset all per-round flags so the new round starts clean
@@ -158,7 +165,9 @@ function AdminInner() {
           setTimerStopped(false);
         }
       } catch (err) {
-        setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        log("admin", `broadcast error: ${msg}`);
+        setStatus(`Error: ${msg}`);
       }
     },
     [roomId, climbingSeconds, preparationSeconds, preparationEnabled, recurring]
@@ -263,6 +272,7 @@ function AdminInner() {
       !hasAutoRestartedRef.current
     ) {
       hasAutoRestartedRef.current = true;
+      log("admin", "recurring auto-restart fired");
       broadcastRef.current?.("START");
     }
     prevClockPhaseRef.current = clockPhase;
@@ -282,6 +292,12 @@ function AdminInner() {
 
     const unsub = onValue(roomRef, (snapshot) => {
       const data = snapshot.val();
+      log("admin", `firebase snapshot`, {
+        hasData: !!data,
+        type: data?.type ?? null,
+        startTime: data?.startTime ?? null,
+        stopped: data?.stopped ?? null,
+      });
 
       if (!data) {
         setTimerStartTime(null);
