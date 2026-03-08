@@ -200,6 +200,8 @@ function DisplayInner() {
                 preparationEnabled: data.preparationEnabled,
                 stopped: false,
                 recurring: true,
+                paused: false,
+                pausedElapsedMs: 0,
               });
               return;
             }
