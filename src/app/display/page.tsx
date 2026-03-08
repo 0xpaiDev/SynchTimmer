@@ -177,8 +177,28 @@ function DisplayInner() {
             (data.preparationEnabled ? data.preparationSeconds * 1000 : 0) +
             data.climbingSeconds * 1000;
 
-          // If round already expired and not manually stopped, show idle
+          // If round already expired and not manually stopped:
+          // - Non-recurring: go idle
+          // - Recurring: compute which round we're currently on (no Firebase write needed)
           if (serverNow >= serverStart + totalMs && !data.stopped) {
+            if (data.recurring) {
+              const elapsed = serverNow - serverStart;
+              const n = Math.floor(elapsed / totalMs);
+              const curServerStart = serverStart + n * totalMs;
+              log("display", `recurring catch-up to round ${n}`, {
+                elapsed: Math.round(elapsed / 1000) + "s",
+                totalMs: Math.round(totalMs / 1000) + "s",
+              });
+              setRound({
+                startTime: curServerStart - offsetRef.current,
+                climbingSeconds: data.climbingSeconds,
+                preparationSeconds: data.preparationSeconds,
+                preparationEnabled: data.preparationEnabled,
+                stopped: false,
+                recurring: true,
+              });
+              return;
+            }
             log("display", "early-expiry guard fired → idle", {
               serverNow,
               serverStart,
@@ -254,23 +274,29 @@ function DisplayInner() {
     const delay = round.startTime + totalMs - Date.now();
     if (delay <= 0) return;
 
-    const timerId = setTimeout(async () => {
-      try {
-        await fetch("/api/broadcast", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "START",
-            roomId,
-            climbingSeconds: round.climbingSeconds,
-            preparationSeconds: round.preparationSeconds,
-            preparationEnabled: round.preparationEnabled,
-            recurring: round.recurring,
-          }),
-        });
-      } catch (e) {
-        console.warn("Recurring restart failed", e);
-      }
+    const timerId = setTimeout(() => {
+      // 1. Advance the display immediately — no network required.
+      //    nextLocalStart is deterministic: currentStart + totalMs.
+      const nextLocalStart = (round.startTime ?? 0) + totalMs;
+      log("display", "recurring local advance");
+      setRound(prev => ({ ...prev, startTime: nextLocalStart }));
+
+      // 2. Sync Firebase in the background so other displays also advance.
+      //    Failure here is fine — this display is already running the next round.
+      fetch("/api/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "START",
+          roomId,
+          climbingSeconds: round.climbingSeconds,
+          preparationSeconds: round.preparationSeconds,
+          preparationEnabled: round.preparationEnabled,
+          recurring: round.recurring,
+        }),
+      })
+        .then(() => log("display", "recurring firebase sync: OK"))
+        .catch(() => log("display", "recurring firebase sync: failed (running locally)"));
     }, delay);
 
     return () => clearTimeout(timerId);
