@@ -129,6 +129,13 @@ function AdminInner() {
         return;
       }
       log("admin", `broadcast type=${type} roomId=${roomId}`);
+      // Guard against recurring auto-restart BEFORE the fetch — Firebase onValue
+      // fires when the doc is deleted (from the server side) before the API
+      // response arrives, so the guard must be in place before the network call.
+      if (type === "RESET") {
+        prevClockPhaseRef.current = "idle";
+        hasAutoRestartedRef.current = true;
+      }
       try {
         const res = await fetch("/api/broadcast", {
           method: "POST",
