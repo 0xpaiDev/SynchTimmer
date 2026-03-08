@@ -14,7 +14,8 @@ export async function POST(req: NextRequest) {
 
   let startTime: string | undefined;
   if (type === "START") {
-    startTime = new Date(Date.now() + 500).toISOString();
+    const now = Date.now();
+    startTime = new Date(now + 500).toISOString();
     await roomRef.set({
       type: "START",
       startTime,
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
       preparationEnabled: rest.preparationEnabled,
       recurring: rest.recurring ?? false,
       stopped: false,
-      updatedAt: Date.now(),
+      updatedAt: now,
+      expiresAt: now + 500 + 24 * 60 * 60 * 1000,
     });
   } else if (type === "RESET") {
     await roomRef.remove();

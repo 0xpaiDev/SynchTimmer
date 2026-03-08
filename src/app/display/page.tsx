@@ -92,6 +92,12 @@ function DisplayInner() {
             return;
           }
 
+          // Auto-kill: session older than 24h
+          if (data.expiresAt && Date.now() >= data.expiresAt) {
+            setRound(DEFAULT_STATE);
+            return;
+          }
+
           setRound({
             startTime: localStart,
             climbingSeconds: data.climbingSeconds,

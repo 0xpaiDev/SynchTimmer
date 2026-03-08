@@ -80,6 +80,9 @@ function AdminInner() {
   // Recurring debounce guard — set sync before async broadcast call
   const hasAutoRestartedRef = useRef(false);
 
+  // 24h auto-expiry guard — prevent duplicate RESET calls
+  const autoExpiredRef = useRef(false);
+
   // Phase/remaining tracking for audio + auto-restart
   const prevPhaseAdminRef = useRef<TimerPhase>("idle");
   const prevRemainingAdminRef = useRef(0);
@@ -284,8 +287,24 @@ function AdminInner() {
         setTimerStartTime(null);
         setTimerStopped(false);
         setIsRunning(false);
+        autoExpiredRef.current = false;
         return;
       }
+
+      // Auto-kill: session older than 24h — clean up Firebase and go idle
+      if (data.expiresAt && Date.now() >= data.expiresAt && !autoExpiredRef.current) {
+        autoExpiredRef.current = true;
+        fetch("/api/broadcast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "RESET", roomId }),
+        });
+        setTimerStartTime(null);
+        setTimerStopped(false);
+        setIsRunning(false);
+        return;
+      }
+      if (data.expiresAt && Date.now() >= data.expiresAt) return;
 
       const serverStart = new Date(data.startTime).getTime();
       const totalMs =
@@ -334,6 +353,9 @@ function AdminInner() {
 
     return () => unsub();
   }, [authed, roomId]);
+
+  // Lock all config inputs while a session is active (running or stopped)
+  const sessionLocked = timerStartTime !== null;
 
   // Derived HMS values for display in HMS input mode
   const climbHms = secondsToHms(climbingSeconds);
@@ -408,16 +430,18 @@ function AdminInner() {
         {/* Room */}
         <section className="bg-[#1c1c1c] rounded-xl p-5 space-y-3 border border-white/[0.08]">
           <h2 className="text-xs font-bold tracking-widest uppercase text-[#9ca3af]">Room</h2>
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${sessionLocked ? "opacity-40" : ""}`}>
             <input
               type="text"
               value={roomId}
               onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-              className="flex-1 px-4 py-2 rounded-lg bg-[#111111] border border-white/10 text-[#f4f4f4] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#f97316]"
+              disabled={sessionLocked}
+              className="flex-1 px-4 py-2 rounded-lg bg-[#111111] border border-white/10 text-[#f4f4f4] font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#f97316] disabled:cursor-not-allowed"
             />
             <button
               onClick={() => setRoomId(generateRoomId())}
-              className="px-4 py-2 rounded-lg bg-[#111111] border border-white/10 hover:border-[#f97316]/40 text-[#9ca3af] hover:text-[#f4f4f4] text-sm transition-colors"
+              disabled={sessionLocked}
+              className="px-4 py-2 rounded-lg bg-[#111111] border border-white/10 hover:border-[#f97316]/40 text-[#9ca3af] hover:text-[#f4f4f4] text-sm transition-colors disabled:cursor-not-allowed"
             >
               New
             </button>
@@ -430,9 +454,34 @@ function AdminInner() {
           </div>
         </section>
 
+        {/* Live session banner */}
+        {timerStartTime !== null && (() => {
+          const isLive = !timerStopped;
+          return (
+            <section className={`rounded-xl px-5 py-4 border ${isLive ? "bg-green-900/50 border-green-500/30" : "bg-red-900/50 border-red-500/30"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-xs font-black tracking-widest ${isLive ? "text-green-400" : "text-red-400"}`}>
+                  {isLive ? "● LIVE" : "● STOPPED"}
+                </span>
+                <span className="text-sm font-mono font-bold text-[#f4f4f4] tracking-widest">{roomId}</span>
+              </div>
+              <p className="text-xs text-[#9ca3af]">
+                Climb: <span className="text-[#f4f4f4]">{fmtMs(climbingSeconds * 1000)}</span>
+                {preparationEnabled && (
+                  <> &nbsp;|&nbsp; Prep: <span className="text-[#f4f4f4]">{fmtMs(preparationSeconds * 1000)}</span></>
+                )}
+                {recurring && <> &nbsp;|&nbsp; <span className="text-[#f4f4f4]">Recurring</span></>}
+              </p>
+            </section>
+          );
+        })()}
+
         {/* Configuration */}
-        <section className="bg-[#1c1c1c] rounded-xl p-5 space-y-4 border border-white/[0.08]">
-          <h2 className="text-xs font-bold tracking-widest uppercase text-[#9ca3af]">Configuration</h2>
+        <section className={`bg-[#1c1c1c] rounded-xl p-5 space-y-4 border border-white/[0.08] ${sessionLocked ? "opacity-40 pointer-events-none select-none" : ""}`}>
+          <h2 className="text-xs font-bold tracking-widest uppercase text-[#9ca3af]">
+            Configuration
+            {sessionLocked && <span className="ml-2 text-[#f97316] normal-case font-normal tracking-normal">locked during session</span>}
+          </h2>
 
           {/* Climbing duration */}
           <div className="flex flex-col gap-1.5">
