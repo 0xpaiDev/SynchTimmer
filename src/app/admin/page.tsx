@@ -663,13 +663,20 @@ function AdminInner() {
           <h2 className="text-xs font-bold tracking-widest uppercase text-[#9ca3af]">Controls</h2>
           {confirmAction ? (
             <div className="flex flex-col gap-3">
-              <p className="text-center text-sm text-[#9ca3af]">Confirm {confirmAction}?</p>
+              <p className="text-center text-sm text-[#9ca3af]">
+                {confirmAction === "STOP"
+                  ? "End session and return to setup?"
+                  : "Restart session from the beginning?"}
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => { broadcast(confirmAction); setConfirmAction(null); }}
+                  onClick={() => {
+                    broadcast(confirmAction === "STOP" ? "RESET" : "START");
+                    setConfirmAction(null);
+                  }}
                   className="py-3 rounded-xl bg-[#dc2626] hover:bg-red-500 font-bold text-lg text-white transition-colors"
                 >
-                  Yes, {confirmAction}
+                  {confirmAction === "STOP" ? "Yes, END" : "Yes, RESTART"}
                 </button>
                 <button
                   onClick={() => setConfirmAction(null)}
@@ -710,13 +717,7 @@ function AdminInner() {
                 STOP
               </button>
               <button
-                onClick={() => {
-                  if (timerStartTime !== null) {
-                    setConfirmAction("RESET");
-                  } else {
-                    broadcast("RESET");
-                  }
-                }}
+                onClick={() => setConfirmAction("RESET")}
                 className="py-4 rounded-xl bg-[#4b5563] hover:bg-[#6b7280] font-black text-lg text-white transition-colors"
               >
                 RESET
