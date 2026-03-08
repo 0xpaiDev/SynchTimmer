@@ -184,7 +184,7 @@ function DisplayInner() {
           // If round already expired and not manually stopped:
           // - Non-recurring: go idle
           // - Recurring: compute which round we're currently on (no Firebase write needed)
-          if (serverNow >= serverStart + totalMs && !data.stopped) {
+          if (serverNow >= serverStart + totalMs && !data.stopped && !data.paused) {
             if (data.recurring) {
               const elapsed = serverNow - serverStart;
               const n = Math.floor(elapsed / totalMs);
@@ -283,6 +283,7 @@ function DisplayInner() {
     if (delay <= 0) return;
 
     const timerId = setTimeout(() => {
+      if (!round.recurring || round.stopped || round.paused) return;
       // 1. Advance the display immediately — no network required.
       //    nextLocalStart is deterministic: currentStart + totalMs.
       const nextLocalStart = (round.startTime ?? 0) + totalMs;
@@ -308,7 +309,7 @@ function DisplayInner() {
     }, delay);
 
     return () => clearTimeout(timerId);
-  }, [round.startTime, round.recurring, round.stopped, roomId]);
+  }, [round.startTime, round.recurring, round.stopped, round.paused, roomId]);
 
   return (
     <div className="relative w-full h-screen">
