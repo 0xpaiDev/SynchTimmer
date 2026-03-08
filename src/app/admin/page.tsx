@@ -671,7 +671,7 @@ function AdminInner() {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => {
-                    broadcast(confirmAction === "STOP" ? "RESET" : "START");
+                    broadcast(confirmAction === "STOP" ? "STOP" : "START");
                     setConfirmAction(null);
                   }}
                   className="py-3 rounded-xl bg-[#dc2626] hover:bg-red-500 font-bold text-lg text-white transition-colors"
@@ -711,16 +711,16 @@ function AdminInner() {
                 </button>
               )}
               <button
-                onClick={() => setConfirmAction("STOP")}
-                className="py-4 rounded-xl bg-[#dc2626] hover:bg-red-500 font-black text-lg text-white transition-colors"
-              >
-                STOP
-              </button>
-              <button
                 onClick={() => setConfirmAction("RESET")}
                 className="py-4 rounded-xl bg-[#4b5563] hover:bg-[#6b7280] font-black text-lg text-white transition-colors"
               >
                 RESET
+              </button>
+              <button
+                onClick={() => setConfirmAction("STOP")}
+                className="py-4 rounded-xl bg-[#dc2626] hover:bg-red-500 font-black text-lg text-white transition-colors"
+              >
+                STOP
               </button>
             </div>
           )}
