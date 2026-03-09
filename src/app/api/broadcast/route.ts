@@ -9,11 +9,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing type or roomId" }, { status: 400 });
   }
 
+  const VALID_TYPES = ["START", "STOP", "PAUSE", "RESUME", "RESET"];
+  if (!VALID_TYPES.includes(type)) {
+    return NextResponse.json({ error: "Unknown type" }, { status: 400 });
+  }
+
   const db = getAdminDb();
   const roomRef = db.ref(`rooms/${roomId}`);
 
   let startTime: string | undefined;
   if (type === "START") {
+    const cs = Number(rest.climbingSeconds);
+    if (!Number.isFinite(cs) || cs < 1 || cs > 7200) {
+      return NextResponse.json({ error: "Invalid climbingSeconds" }, { status: 400 });
+    }
     const now = Date.now();
     startTime = new Date(now + 500).toISOString();
     await roomRef.set({
@@ -42,7 +51,7 @@ export async function POST(req: NextRequest) {
   } else if (type === "RESUME") {
     const snap = await roomRef.get();
     const existing = snap.val();
-    if (!existing || existing.pausedElapsedMs === undefined) {
+    if (!existing || !existing.paused || existing.pausedElapsedMs === undefined) {
       return NextResponse.json({ error: "No paused session" }, { status: 400 });
     }
     const now = Date.now();

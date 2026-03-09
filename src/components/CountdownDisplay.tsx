@@ -161,7 +161,7 @@ export default function CountdownDisplay({
   const { bg, label, text } = phaseStyle[phase];
 
   return (
-    <div className={`flex flex-col items-center justify-center w-full h-full min-h-screen ${bg} transition-colors duration-500`}>
+    <div className={`flex flex-col items-center justify-center w-full h-full min-h-screen ${bg} transition-colors duration-500`} data-testid="countdown-display">
       {label && (
         <div className={`text-4xl font-bold tracking-widest uppercase mb-6 ${text}`}>
           {label}

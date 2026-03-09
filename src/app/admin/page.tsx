@@ -432,11 +432,13 @@ function AdminInner() {
               onChange={(e) => setPin(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-[#111111] border border-white/10 text-[#f4f4f4] text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-[#f97316]"
               autoFocus
+              data-testid="pin-input"
             />
             {pinError && <p className="text-red-400 text-sm text-center">Incorrect PIN</p>}
             <button
               type="submit"
               className="w-full py-3 rounded-lg bg-[#f97316] hover:bg-orange-400 font-bold text-white transition-colors"
+              data-testid="pin-submit"
             >
               Enter
             </button>
@@ -515,7 +517,7 @@ function AdminInner() {
           const bannerTextColor = isLive ? "text-green-400" : isPaused ? "text-blue-400" : "text-red-400";
           const bannerLabel = isLive ? "● LIVE" : isPaused ? "⏸ PAUSED" : "● STOPPED";
           return (
-            <section className={`rounded-xl px-5 py-4 border ${bannerBg}`}>
+            <section className={`rounded-xl px-5 py-4 border ${bannerBg}`} data-testid="session-banner">
               <div className="flex items-center gap-2 mb-1">
                 <span className={`text-xs font-black tracking-widest ${bannerTextColor}`}>
                   {bannerLabel}
@@ -685,12 +687,14 @@ function AdminInner() {
                     setConfirmAction(null);
                   }}
                   className="py-3 rounded-xl bg-[#dc2626] hover:bg-red-500 font-bold text-lg text-white transition-colors"
+                  data-testid="btn-confirm-yes"
                 >
                   {confirmAction === "STOP" ? "Yes, END" : "Yes, RESTART"}
                 </button>
                 <button
                   onClick={() => setConfirmAction(null)}
                   className="py-3 rounded-xl bg-[#4b5563] hover:bg-[#6b7280] font-bold text-lg text-white transition-colors"
+                  data-testid="btn-confirm-cancel"
                 >
                   Cancel
                 </button>
@@ -700,6 +704,7 @@ function AdminInner() {
             <button
               onClick={() => broadcast("START")}
               className="w-full py-4 rounded-xl bg-[#16a34a] hover:bg-green-500 font-black text-lg text-white transition-colors"
+              data-testid="btn-start"
             >
               START
             </button>
@@ -709,6 +714,7 @@ function AdminInner() {
                 <button
                   onClick={() => broadcast("RESUME")}
                   className="py-4 rounded-xl bg-[#16a34a] hover:bg-green-500 font-black text-lg text-white transition-colors"
+                  data-testid="btn-resume"
                 >
                   RESUME
                 </button>
@@ -716,6 +722,7 @@ function AdminInner() {
                 <button
                   onClick={() => broadcast("PAUSE")}
                   className="py-4 rounded-xl bg-[#ca8a04] hover:bg-yellow-500 font-black text-lg text-white transition-colors"
+                  data-testid="btn-pause"
                 >
                   PAUSE
                 </button>
@@ -723,14 +730,16 @@ function AdminInner() {
               <button
                 onClick={() => setConfirmAction("RESET")}
                 className="py-4 rounded-xl bg-[#4b5563] hover:bg-[#6b7280] font-black text-lg text-white transition-colors"
+                data-testid="btn-reset"
               >
                 RESET
               </button>
               <button
                 onClick={() => setConfirmAction("STOP")}
                 className="py-4 rounded-xl bg-[#dc2626] hover:bg-red-500 font-black text-lg text-white transition-colors"
+                data-testid="btn-stop"
               >
-                STOP
+                END SESSION
               </button>
             </div>
           )}
@@ -756,7 +765,7 @@ function AdminInner() {
                   {label}
                 </p>
               )}
-              <p className={`text-6xl font-mono font-black tabular-nums ${text}`}>
+              <p className={`text-6xl font-mono font-black tabular-nums ${text}`} data-testid="clock-display">
                 {timerStartTime !== null && clockPhase !== "idle" ? fmtMs(clockRemaining) : "--:--"}
               </p>
             </section>

@@ -334,6 +334,7 @@ function DisplayInner() {
             preloadCountdown10s();
             setAudioUnlocked(true);
           }}
+          data-testid="audio-unlock-overlay"
         >
           <p className="text-white text-2xl font-bold tracking-widest uppercase select-none">
             Tap to Enable Sound
